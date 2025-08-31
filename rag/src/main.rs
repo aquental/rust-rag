@@ -10,6 +10,15 @@ struct Document {
 
 type KnowledgeBase = HashMap<String, Document>;
 
+/// Creates a `KnowledgeBase` containing three sample documents related to Project Chimera.
+/// These documents are used for testing and demonstration purposes.
+///
+/// The `KnowledgeBase` is a `HashMap` where the keys are document IDs and the values
+/// are `Document` structs containing the title and content of each document.
+///
+/// Document 1: "Project Chimera Overview"
+/// Document 2: "Chimera's Neural Interface"
+/// Document 3: "Applications of Chimera"
 fn create_knowledge_base() -> KnowledgeBase {
     let mut kb = HashMap::new();
 
@@ -50,55 +59,111 @@ fn create_knowledge_base() -> KnowledgeBase {
     kb
 }
 
-async fn naive_generation(query: &str, llm: &llm::LlmClient) -> Result<String, Box<dyn std::error::Error>> {
+/// naive_generation function
+/// Parameters:
+///   query: &str - The user's question
+///   llm: &llm::LlmClient - The LLM client instance
+/// Returns: Result<String, Box<dyn std::error::Error>>
+/// Steps:
+///   1. Format a simple prompt with the query using format!()
+///   2. Call llm.get_llm_response() with the prompt and return result
+async fn naive_generation(
+    query: &str,
+    llm: &llm::LlmClient,
+) -> Result<String, Box<dyn std::error::Error>> {
     let prompt = format!("Answer directly the following query: {}", query);
     llm.get_llm_response(&prompt).await
 }
 
-/// Retrieve all documents with any word overlap with the query.
+/// rag_retrieval function
+/// Parameters:
+///   query: &str - The user's question
+///   documents: &'a KnowledgeBase - The knowledge base
+/// Returns: Vec<&'a Document> - A vector of documents that overlap with the query
+/// Steps:
+///   1. Convert query to lowercase and collect words into HashSet
+///   2. Iterate through documents using iter() and filter_map()
+///   3. For each doc, get word overlap count with query
+///   4. Return documents with overlap count > 0 using collect()
 fn rag_retrieval<'a>(query: &str, documents: &'a KnowledgeBase) -> Vec<&'a Document> {
     let query_lower = query.to_lowercase();
-    let query_words: HashSet<_> = query_lower.split_whitespace().map(|s| s.to_string()).collect();
+    let query_words: HashSet<_> = query_lower
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect();
 
-    documents.iter()
+    documents
+        .iter()
         .filter_map(|(_, doc)| {
             let content_lower = doc.content.to_lowercase();
-            let content_words: HashSet<_> = content_lower.split_whitespace().map(|s| s.to_string()).collect();
+            let content_words: HashSet<_> = content_lower
+                .split_whitespace()
+                .map(|s| s.to_string())
+                .collect();
             let overlap = query_words.intersection(&content_words).count();
-            if overlap > 0 {
-                Some(doc)
-            } else {
-                None
-            }
+            if overlap > 0 { Some(doc) } else { None }
         })
         .collect()
 }
 
-/// Generate a response using the retrieved documents as context.
-async fn rag_generation(query: &str, documents: Vec<&Document>, llm: &llm::LlmClient) -> Result<String, Box<dyn std::error::Error>> {
+/// rag_generation function
+/// Parameters:
+///   query: &str - The user's question
+///   documents: Vec<&Document> - The retrieved documents
+///   llm: &llm::LlmClient - The LLM client instance
+/// Returns: Result<String, Box<dyn std::error::Error>>
+/// Steps:
+///   1. Match on documents to create appropriate prompt
+///   2. If documents is empty, create direct query prompt
+///   3. If documents is not empty, create prompt with context from documents
+///   4. Call llm.get_llm_response() with prompt and return result
+async fn rag_generation(
+    query: &str,
+    documents: Vec<&Document>,
+    llm: &llm::LlmClient,
+) -> Result<String, Box<dyn std::error::Error>> {
     let prompt = if documents.is_empty() {
         format!("No relevant information found. Answer directly: {}", query)
     } else {
-        let context = documents.iter()
+        let context = documents
+            .iter()
             .map(|doc| format!("{}: {}", doc.title, doc.content))
             .collect::<Vec<_>>()
             .join("\n");
-        format!("Using the following information:\n'{}'\nAnswer: {}", context, query)
+        format!(
+            "Using the following information:\n'{}'\nAnswer: {}",
+            context, query
+        )
     };
     llm.get_llm_response(&prompt).await
 }
 
+/// Main entry point for the RAG application.
+///
+/// This function initializes a knowledge base of documents, asks a user for a query,
+/// and then uses both a naive and a RAG-based approach to generate an answer.
+/// The two answers are then printed to the console for comparison.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let kb = create_knowledge_base();
     let query = "What are the applications of Project Chimera?";
 
+    // Create LlmClient instance
     let llm_client = llm::LlmClient::new();
 
-    println!("Naive approach: {}", naive_generation(query, &llm_client).await?);
+    // Call naive_generation and print result
+    println!(
+        "Naive approach: {}",
+        naive_generation(query, &llm_client).await?
+    );
 
+    // Call rag_retrieval to get relevant document
     let retrieved_docs = rag_retrieval(query, &kb);
-    println!("RAG approach: {}", rag_generation(query, retrieved_docs, &llm_client).await?);
+    // Call rag_generation with document and print result
+    println!(
+        "RAG approach: {}",
+        rag_generation(query, retrieved_docs, &llm_client).await?
+    );
 
     Ok(())
 }
