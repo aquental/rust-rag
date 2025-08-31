@@ -50,10 +50,7 @@ fn create_knowledge_base() -> KnowledgeBase {
     kb
 }
 
-async fn naive_generation(
-    query: &str,
-    llm: &llm::LlmClient,
-) -> Result<String, Box<dyn std::error::Error>> {
+async fn naive_generation(query: &str, llm: &llm::LlmClient) -> Result<String, Box<dyn std::error::Error>> {
     let prompt = format!("Answer directly the following query: {}", query);
     llm.get_llm_response(&prompt).await
 }
@@ -61,43 +58,32 @@ async fn naive_generation(
 /// Retrieve all documents with any word overlap with the query.
 fn rag_retrieval<'a>(query: &str, documents: &'a KnowledgeBase) -> Vec<&'a Document> {
     let query_lower = query.to_lowercase();
-    let query_words: HashSet<_> = query_lower
-        .split_whitespace()
-        .map(|s| s.to_string())
-        .collect();
+    let query_words: HashSet<_> = query_lower.split_whitespace().map(|s| s.to_string()).collect();
 
-    documents
-        .iter()
+    documents.iter()
         .filter_map(|(_, doc)| {
             let content_lower = doc.content.to_lowercase();
-            let content_words: HashSet<_> = content_lower
-                .split_whitespace()
-                .map(|s| s.to_string())
-                .collect();
+            let content_words: HashSet<_> = content_lower.split_whitespace().map(|s| s.to_string()).collect();
             let overlap = query_words.intersection(&content_words).count();
-            if overlap > 0 { Some(doc) } else { None }
+            if overlap > 0 {
+                Some(doc)
+            } else {
+                None
+            }
         })
         .collect()
 }
 
 /// Generate a response using the retrieved documents as context.
-async fn rag_generation(
-    query: &str,
-    documents: Vec<&Document>,
-    llm: &llm::LlmClient,
-) -> Result<String, Box<dyn std::error::Error>> {
+async fn rag_generation(query: &str, documents: Vec<&Document>, llm: &llm::LlmClient) -> Result<String, Box<dyn std::error::Error>> {
     let prompt = if documents.is_empty() {
         format!("No relevant information found. Answer directly: {}", query)
     } else {
-        let context = documents
-            .iter()
+        let context = documents.iter()
             .map(|doc| format!("{}: {}", doc.title, doc.content))
             .collect::<Vec<_>>()
             .join("\n");
-        format!(
-            "Using the following information:\n'{}'\nAnswer: {}",
-            context, query
-        )
+        format!("Using the following information:\n'{}'\nAnswer: {}", context, query)
     };
     llm.get_llm_response(&prompt).await
 }
@@ -109,16 +95,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let llm_client = llm::LlmClient::new();
 
-    println!(
-        "Naive approach: {}",
-        naive_generation(query, &llm_client).await?
-    );
+    println!("Naive approach: {}", naive_generation(query, &llm_client).await?);
 
-    let retrieved_doc = rag_retrieval(query, &kb);
-    println!(
-        "RAG approach: {}",
-        rag_generation(query, retrieved_doc, &llm_client).await?
-    );
+    let retrieved_docs = rag_retrieval(query, &kb);
+    println!("RAG approach: {}", rag_generation(query, retrieved_docs, &llm_client).await?);
 
     Ok(())
 }
