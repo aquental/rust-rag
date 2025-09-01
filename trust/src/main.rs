@@ -67,65 +67,70 @@ async fn naive_generation(
     llm.get_llm_response(&prompt).await
 }
 
-/// Retrieve the top K documents from the knowledge base with the highest word overlap.
-
-fn rag_retrieval<'a>(query: &str, documents: &'a KnowledgeBase, k: usize) -> Vec<&'a Document> {
-    // Convert the query to lowercase and tokenize
+/// Retrieve the document from the knowledge base with highest word overlap.
+fn rag_retrieval<'a>(query: &str, documents: &'a KnowledgeBase) -> Option<&'a Document> {
     let query_lower = query.to_lowercase();
     let query_words: HashSet<_> = query_lower.split_whitespace().collect();
 
-    // Calculate overlap score for each document
-    let mut scored_documents: Vec<(&'a Document, usize)> = documents
-        .iter()
-        .map(|(_, doc)| {
-            // Convert document content to lowercase and tokenize
-            let content_lower = doc.content.to_lowercase();
-            let content_words: HashSet<_> = content_lower.split_whitespace().collect();
-
-            // Calculate overlap score using set intersection
-            let overlap = query_words.intersection(&content_words).count();
-
+    documents
+        .values()
+        .map(|doc| {
+            let doc_lower = doc.content.to_lowercase();
+            let doc_words: HashSet<_> = doc_lower.split_whitespace().collect();
+            let overlap = query_words.intersection(&doc_words).count();
             (doc, overlap)
         })
-        .collect();
-
-    // Print the overlap score for each document
-    println!("\nDocument relevance scores:");
-    for (doc, score) in &scored_documents {
-        println!("  {} - Score: {}", doc.title, score);
-    }
-    println!();
-
-    // Sort documents by overlap score in descending order
-    scored_documents.sort_by(|a, b| b.1.cmp(&a.1));
-
-    // Return the top K documents with the highest overlap scores
-    scored_documents
-        .into_iter()
-        .filter(|(_, score)| *score > 0) // Only include documents with at least some overlap
-        .take(k)
+        .max_by_key(|(_, overlap)| *overlap)
         .map(|(doc, _)| doc)
-        .collect()
 }
 
-/// Generate a response using the retrieved documents as context.
+/// Generate a response using the retrieved document as context.
 async fn rag_generation(
     query: &str,
-    documents: Vec<&Document>,
+    document: Option<&Document>,
     llm: &llm::LlmClient,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let prompt = if !documents.is_empty() {
-        let mut snippet = String::new();
-        for doc in documents {
-            snippet.push_str(&format!("{}: {}\n\n", doc.title, doc.content));
+    // Extract requested stock symbols from the query
+    let query_lower = query.to_lowercase();
+    let query_words: HashSet<String> = query_lower
+        .split_whitespace()
+        .map(|word| word.trim_matches(|c| c == ',' || c == '.').to_string())
+        .collect();
+    let stock_symbols: Vec<String> = query_words
+        .into_iter()
+        .filter(|word| word.chars().all(|c| c.is_alphabetic()))
+        .collect();
+
+    // Prepare the prompt based on document availability and completeness
+    let prompt = match document {
+        Some(doc) => {
+            // Check if the document contains data for all requested symbols
+            let doc_lower = doc.title.to_lowercase();
+            let has_all_symbols = stock_symbols
+                .iter()
+                .all(|symbol| doc_lower.contains(&symbol.to_lowercase()));
+            if has_all_symbols {
+                format!(
+                    "Using the following information: '{}: {}', provide a confident and accurate answer to the query: '{}'",
+                    doc.title, doc.content, query
+                )
+            } else {
+                format!(
+                    "The available information: '{}: {}' does not contain sufficient data for all requested stock symbols. \
+                    Politely refuse to answer the query, stating that there isn't enough information to respond accurately: '{}'",
+                    doc.title, doc.content, query
+                )
+            }
         }
-        format!(
-            "Using the following information: '{}', answer: {}",
-            snippet, query
-        )
-    } else {
-        format!("No relevant information found. Answer directly: {}", query)
+        None => {
+            format!(
+                "No relevant information was found in the knowledge base for the requested stock symbols. \
+                Politely refuse to answer the query, stating that there isn't enough information to respond accurately: '{}'",
+                query
+            )
+        }
     };
+
     llm.get_llm_response(&prompt).await
 }
 
@@ -134,7 +139,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let kb = create_knowledge_base();
 
     let query = "Write a short summary of the stock market performance on April 14, \
-                 2023 for the following symbols: AAPL, MSFT, TSLA.\n\
+                 2023 for the following symbols: NVDA, GOOG.\n\
                  Your summary should include:\n\
                  For each symbol:\n\
                  - The opening price\n\
@@ -149,10 +154,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         naive_generation(query, &llm_client).await?
     );
 
-    let top_docs = rag_retrieval(query, &kb, 2);
+    let retrieved_doc = rag_retrieval(query, &kb);
     println!(
         "\n\nRAG approach:\n{}",
-        rag_generation(query, top_docs, &llm_client).await?
+        rag_generation(query, retrieved_doc, &llm_client).await?
     );
 
     Ok(())
