@@ -5,7 +5,6 @@ use ndarray::Array1;
 use std::error::Error;
 
 /// Compute cosine similarity between two vectors.
-/// 1.0 means identical direction, 0.0 means orthogonal.
 fn cosine_similarity(vec_a: &Array1<f32>, vec_b: &Array1<f32>) -> f32 {
     let dot = vec_a.dot(vec_b);
     let norm_a = vec_a.dot(vec_a).sqrt();
@@ -17,35 +16,42 @@ fn cosine_similarity(vec_a: &Array1<f32>, vec_b: &Array1<f32>) -> f32 {
 async fn main() -> Result<(), Box<dyn Error>> {
     let embedder = SentenceEmbedder::new().await?;
 
-    // Example sentences with similar or related meaning
+    // Example sentences
     let sentences = vec![
-        "RAG stands for Retrieval Augmented Generation.",
-        "A Large Language Model is a Generative AI model for text generation.",
-        "RAG enhance text generation of LLMs by incorporating external data",
-        // Added sentence that partially overlaps (relates to LLMs and text generation)
-        "Large Language Models can generate coherent text based on training data.",
-        // Added sentence on a completely different topic
-        "The Pacific Ocean is the largest and deepest ocean on Earth.",
+        "The Eiffel Tower is one of the most famous landmarks in Paris.",
+        "Quantum computing promises to revolutionize technology with its speed.",
+        "The Amazon rainforest is home to a vast diversity of wildlife.",
+        "Meditation can significantly reduce stress and improve mental health.",
+        "The Great Wall of China stretches over 13,000 miles.",
     ];
 
-    // TODO: Add two new sentences here:
-    // 1) one that partially overlaps with the first three
-    // 2) one that is completely different in topic
-
+    // Encode each sentence into its embedding vector
     let sentence_refs: Vec<&str> = sentences.iter().map(|s| *s).collect();
-    let embeddings = embedder.embed_texts(&sentence_refs).await?;
+    let embeddings = embedder.embed_texts(&sentence_refs)?;
 
-    // Compare each sentence's embedding to every other using cosine similarity
-    for i in 0..embeddings.len() {
-        let vec_i = Array1::from(embeddings[i].clone());
-        for j in (i + 1)..embeddings.len() {
-            let vec_j = Array1::from(embeddings[j].clone());
-            let sim_score = cosine_similarity(&vec_i, &vec_j);
-            println!(
-                "Similarity(\"{}\" , \"{}\") = {:.4}",
-                sentences[i], sentences[j], sim_score
-            );
-        }
+    // Define a query sentence and compute its embedding
+    let query = "Famous landmarks attract millions of tourists each year.";
+    let query_ref = vec![query];
+    let query_embedding = embedder.embed_texts(&query_ref)?[0].clone();
+
+    // Compute similarity of the query to each of the other sentences
+    let mut similarities: Vec<(usize, f32, &str)> = Vec::new();
+    for (i, embedding) in embeddings.iter().enumerate() {
+        let similarity = cosine_similarity(
+            &Array1::from(embedding.clone()),
+            &Array1::from(query_embedding.clone()),
+        );
+        similarities.push((i, similarity, sentences[i]));
+    }
+
+    // Sort the sentences by similarity score in descending order
+    similarities.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Print the sorted sentences with their similarity scores
+    println!("Query: '{}'", query);
+    println!("Sentences sorted by similarity to query:");
+    for (_, similarity, sentence) in similarities {
+        println!("{:.4} - {}", similarity, sentence);
     }
 
     Ok(())
