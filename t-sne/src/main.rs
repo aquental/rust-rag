@@ -39,6 +39,7 @@ fn get_color_and_shape_maps() -> (
         ("Food", GREEN),
         ("Weather", PURPLE),
         // TODO: Add your new category color here
+        ("Travel", YELLOW),
     ]);
 
     let shape_map = HashMap::from([
@@ -47,6 +48,7 @@ fn get_color_and_shape_maps() -> (
         ("Food", GREEN.filled()),
         ("Weather", PURPLE.filled()),
         // TODO: Add your new category shape here
+        ("Travel", YELLOW.filled()),
     ]);
 
     (color_map, shape_map)
