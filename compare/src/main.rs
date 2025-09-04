@@ -2,66 +2,53 @@ use ndarray::Array1;
 use std::collections::{HashMap, HashSet};
 
 fn build_vocab(docs: &[&str]) -> HashMap<String, usize> {
-    let mut unique_tokens = HashSet::new();
+    let mut unique_words = HashSet::new();
     for doc in docs {
-        let words: Vec<String> = doc
-            .to_lowercase()
-            .split_whitespace()
-            .map(|w| w.trim_matches(|c: char| ".,!?".contains(c)).to_string())
-            .filter(|w| !w.is_empty())
-            .collect();
-        // Add unigrams
-        for i in 0..words.len() {
-            unique_tokens.insert(words[i].clone());
-            // Add bigrams
-            if i < words.len() - 1 {
-                let bigram = format!("{} {}", words[i], words[i + 1]);
-                unique_tokens.insert(bigram);
+        for word in doc.to_lowercase().split_whitespace() {
+            let clean = word.trim_matches(|c: char| ".,!?".contains(c));
+            if !clean.is_empty() {
+                unique_words.insert(clean.to_string());
             }
         }
     }
-    let mut sorted_tokens: Vec<_> = unique_tokens.into_iter().collect();
-    sorted_tokens.sort();
-    sorted_tokens
+    let mut sorted_words: Vec<_> = unique_words.into_iter().collect();
+    sorted_words.sort();
+    sorted_words
         .into_iter()
         .enumerate()
-        .map(|(i, tok)| (tok, i))
+        .map(|(idx, word)| (word, idx))
         .collect()
 }
 
 fn bow_vectorize(text: &str, vocab: &HashMap<String, usize>) -> Array1<usize> {
-    let words: Vec<String> = text
-        .to_lowercase()
-        .split_whitespace()
-        .map(|w| w.trim_matches(|c: char| ".,!?".contains(c)).to_string())
-        .filter(|w| !w.is_empty())
-        .collect();
     let mut vector = Array1::zeros(vocab.len());
-    for i in 0..words.len() {
-        // Count unigrams
-        if let Some(&idx) = vocab.get(&words[i]) {
+    for word in text.to_lowercase().split_whitespace() {
+        let clean = word.trim_matches(|c: char| ".,!?".contains(c));
+        if let Some(&idx) = vocab.get(clean) {
             vector[idx] += 1;
-        }
-        // Count bigrams
-        if i < words.len() - 1 {
-            let bigram = format!("{} {}", words[i], words[i + 1]);
-            if let Some(&idx) = vocab.get(&bigram) {
-                vector[idx] += 1;
-            }
         }
     }
     vector
 }
 
 fn bow_search(query: &str, docs: &[&str], vocab: &HashMap<String, usize>) -> Vec<(usize, usize)> {
+    // Transform the query into a BOW vector
     let query_vec = bow_vectorize(query, vocab);
+
+    // Transform each document into a BOW vector and compute scores
     let mut scores = Vec::new();
     for (i, doc) in docs.iter().enumerate() {
+        // Transform document into BOW vector
         let doc_vec = bow_vectorize(doc, vocab);
+        // Compute dot product between query and document vectors
         let score = query_vec.dot(&doc_vec);
         scores.push((i, score));
     }
+
+    // Sort documents by score in descending order
     scores.sort_by(|a, b| b.1.cmp(&a.1));
+
+    // Return sorted scores
     scores
 }
 
@@ -81,11 +68,10 @@ fn main() {
         "How does a system combine external data with language generation to improve responses?";
 
     println!("Query: {query}");
-    println!("Vocabulary size: {}", vocab.len());
 
-    let results = bow_search(query, &knowledge_base, &vocab);
+    let bow_results = bow_search(query, &knowledge_base, &vocab);
     println!("BOW Search Results:");
-    for (idx, score) in results {
+    for (idx, score) in bow_results {
         println!(
             "  Doc {idx} | Score: {score} | Text: {}",
             knowledge_base[idx]
