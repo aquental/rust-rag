@@ -1,22 +1,24 @@
 mod embeddings;
 
 use embeddings::SentenceEmbedder;
-use ndarray::{Array1, ArrayView1};
+use ndarray::Array1;
 use std::error::Error;
 
 fn cosine_similarity(vec_a: &Array1<f32>, vec_b: &Array1<f32>) -> f32 {
-    // Compute dot product
+    // Calculate dot product
     let dot_product = vec_a.dot(vec_b);
-    // Compute L2 norms (magnitudes) of both vectors
+
+    // Calculate L2 norms (magnitude) of both vectors
     let norm_a = vec_a.dot(vec_a).sqrt();
     let norm_b = vec_b.dot(vec_b).sqrt();
-    // Handle division by zero (if either norm is zero, return 0.0)
+
+    // Handle division by zero
     if norm_a == 0.0 || norm_b == 0.0 {
-        0.0
-    } else {
-        // Cosine similarity = dot product / (norm_a * norm_b)
-        dot_product / (norm_a * norm_b)
+        return 0.0;
     }
+
+    // Calculate cosine similarity: dot_product / (norm_a * norm_b)
+    dot_product / (norm_a * norm_b)
 }
 
 fn embedding_search(
@@ -25,22 +27,27 @@ fn embedding_search(
     embedder: &SentenceEmbedder,
 ) -> Result<Vec<(usize, f32)>, Box<dyn Error>> {
     // Encode the query into an embedding vector
-    let query_embedding = embedder.encode(query).await?;
+    let query_embedding = embedder.embed_texts(&[query])?;
+    let query_embedding = Array1::from_vec(query_embedding[0].clone());
 
-    // Encode documents into embedding vectors and compute similarities
-    let mut scores = Vec::new();
-    for (i, doc) in docs.iter().enumerate() {
-        // Encode document into embedding vector
-        let doc_embedding = embedder.encode(doc).await?;
-        // Compute cosine similarity between query and document embeddings
-        let similarity = cosine_similarity(&query_embedding, &doc_embedding);
-        scores.push((i, similarity));
-    }
+    // Encode all documents into embedding vectors
+    let doc_embeddings = embedder.embed_texts(docs)?;
+
+    // Calculate cosine similarity between query and each document
+    let mut results: Vec<(usize, f32)> = doc_embeddings
+        .iter()
+        .enumerate()
+        .map(|(idx, doc_emb)| {
+            let doc_array = Array1::from_vec(doc_emb.clone());
+            let similarity = cosine_similarity(&query_embedding, &doc_array);
+            (idx, similarity)
+        })
+        .collect();
 
     // Sort results by similarity in descending order
-    scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-    Ok(scores)
+    Ok(results)
 }
 
 #[tokio::main]
