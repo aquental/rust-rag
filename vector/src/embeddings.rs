@@ -24,4 +24,9 @@ impl SentenceEmbedder {
                 embeddings.first().map_or(0, |v| v.len()));
         Ok(embeddings)
     }
+
+    // Method to embed texts, designed to be called asynchronously
+    pub async fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, Box<dyn Error>> {
+        self.embed_texts(texts)
+    }
 }
