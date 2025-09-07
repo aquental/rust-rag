@@ -1,10 +1,12 @@
 mod data;
 mod embeddings;
 mod vector_db;
+mod llm;
 
 use data::load_documents;
 use vector_db::{build_chroma_collection, retrieve_top_chunks};
 use embeddings::SentenceEmbedder;
+use llm::LlmClient;
 use std::env;
 use std::error::Error;
 
@@ -26,7 +28,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("ChromaDB collection created with {} documents.", doc_count);
 
     // TODO: Define a query string to test the retrieval function
-    let user_query = "what is Urban Wellness?";
+    let user_query = "What are some recent technological breakthroughs?";
 
     // Retrieve the top documents relevant to the query.
     let top_k = 3;
@@ -40,6 +42,39 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("Doc ID: {}", chunk.doc_id);
         println!("Distance: {}", chunk.distance);
         println!("{}", "-".repeat(40));
+    }
+
+    // Create LLM client and generate response
+    println!("\n{}", "=".repeat(60));
+    println!("Initializing LLM Client...");
+    let llm_client = LlmClient::new();
+    
+    // Build the prompt with retrieved chunks
+    let prompt = llm_client.build_prompt(user_query, &retrieved_chunks);
+    
+    // Print the formatted prompt for demonstration
+    println!("\n{}", "=".repeat(60));
+    println!("FORMATTED PROMPT:");
+    println!("{}", "=".repeat(60));
+    println!("{}", prompt);
+    
+    // Get LLM response
+    println!("{}", "=".repeat(60));
+    println!("Getting LLM Response...");
+    println!("{}", "=".repeat(60));
+    
+    match llm_client.get_llm_response(&prompt).await {
+        Ok(response) => {
+            println!("\n{}", "=".repeat(60));
+            println!("FINAL ANSWER:");
+            println!("{}", "=".repeat(60));
+            println!("{}", response);
+            println!("{}", "=".repeat(60));
+        }
+        Err(e) => {
+            eprintln!("Error getting LLM response: {}", e);
+            eprintln!("Make sure OPENAI_API_KEY is set in your environment or .env file");
+        }
     }
 
     Ok(())
