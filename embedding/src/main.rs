@@ -27,12 +27,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Encode each sentence into its embedding vector
     let sentence_refs: Vec<&str> = sentences.iter().map(|s| *s).collect();
-    let embeddings = embedder.embed_texts(&sentence_refs)?;
+    let embeddings = embedder.embed_texts(&sentence_refs).await?;
 
     // Define a query sentence and compute its embedding
     let query = "Famous landmarks attract millions of tourists each year.";
     let query_ref = vec![query];
-    let query_embedding = embedder.embed_texts(&query_ref)?[0].clone();
+    let query_embedding = embedder.embed_texts(&query_ref).await?[0].clone();
 
     // Compute similarity of the query to each of the other sentences
     let mut similarities: Vec<(usize, f32, &str)> = Vec::new();
