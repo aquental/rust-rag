@@ -136,3 +136,180 @@ cargo run
 3. **Flexible Querying**: Option to search with or without category constraints.
 4. **Graceful Fallback**: Automatic retry without filter if category yields no results.
 5. **Better Context**: LLM receives more focused context for generating responses.
+
+# Dual Filtering in RAG System
+
+## Overview
+
+The enhanced RAG system now supports **dual filtering** - combining both category-based filtering and similarity distance thresholds to retrieve the most relevant documents. This provides fine-grained control over the retrieval process.
+
+## Key Features
+
+### 1. Distance Threshold Filtering
+
+- **Purpose**: Ensures only sufficiently similar documents are retrieved
+- **Range**: 0.0 (identical) to 2.0 (completely different)
+- **Recommended Values**:
+  - `0.0 - 0.5`: Very high similarity (nearly identical content)
+  - `0.5 - 0.8`: High similarity (closely related content)
+  - `0.8 - 1.2`: Good similarity (related content)
+  - `1.2 - 1.5`: Moderate similarity (somewhat related)
+  - `> 1.5`: Low similarity (loosely related)
+
+### 2. Category Filtering
+
+- Filters documents by predefined categories
+- Available categories: Technology, Science, Health, Education, Business, etc.
+- Can be combined with distance threshold for precise filtering
+
+### 3. Dual Filtering
+
+- Both filters work simultaneously
+- Documents must meet BOTH criteria to be included
+- Provides maximum precision in retrieval
+
+## Implementation Details
+
+### Function Signature
+
+```rust
+pub async fn retrieve_top_chunks(
+    collection: &ChromaCollection,
+    query: &str,
+    top_k: usize,
+    embedder: &SentenceEmbedder,
+    category_filter: Option<&str>,     // Category constraint
+    distance_threshold: Option<f32>,   // Similarity constraint
+) -> Result<Vec<RetrievedChunk>, Box<dyn std::error::Error>>
+```
+
+### Filtering Logic
+
+1. **Category Filter**: Applied via ChromaDB's metadata filtering
+2. **Distance Filter**: Applied post-retrieval on similarity scores
+3. **Optimization**: Requests 3x the desired results when distance filtering is active to ensure enough results after filtering
+
+## Usage Examples
+
+### Example 1: Strict Dual Filtering
+
+```rust
+let category_filter = Some("Technology");
+let distance_threshold = Some(0.8);  // High similarity required
+// Returns only Technology documents with distance ≤ 0.8
+```
+
+### Example 2: Category Only
+
+```rust
+let category_filter = Some("Health");
+let distance_threshold = None;
+// Returns all Health documents regardless of similarity
+```
+
+### Example 3: Distance Only
+
+```rust
+let category_filter = None;
+let distance_threshold = Some(1.0);
+// Returns documents from any category with good similarity
+```
+
+### Example 4: No Filtering
+
+```rust
+let category_filter = None;
+let distance_threshold = None;
+// Returns top-k most similar documents from any category
+```
+
+## Graceful Error Handling
+
+### When No Results Match
+
+The system provides helpful feedback when filters are too restrictive:
+
+1. **Clear Error Message**: Indicates which filters were applied
+2. **Suggestions**: Offers ways to relax constraints
+3. **Fallback Search**: Automatically attempts search without filters to show what's available
+4. **Preview Results**: Shows distance scores and previews of unfiltered results
+
+### Example Output
+
+```
+⚠️  No relevant documents found!
+
+The search returned no results that meet your criteria:
+  • Category: Technology
+  • Similarity threshold: distance ≤ 0.50
+
+Suggestions:
+  1. Try relaxing the distance threshold (increase the value)
+  2. Remove or change the category filter
+  3. Rephrase your query
+
+------------------------------------------------------------
+Attempting search without filters for comparison...
+
+Found 3 documents without filters:
+  1. Distance: 0.8631, Doc ID: 1
+     Preview: Artificial intelligence is transforming...
+```
+
+## Visual Similarity Indicators
+
+The system provides visual feedback for similarity levels:
+
+- `★★★★★` - Very High (distance ≤ 0.5)
+- `★★★★` - High (distance ≤ 0.8)
+- `★★★` - Good (distance ≤ 1.0)
+- `★★` - Moderate (distance ≤ 1.2)
+- `★` - Low (distance > 1.2)
+
+## Performance Considerations
+
+1. **Query Optimization**: When distance filtering is active, the system requests more initial results (3x top_k) to ensure enough results after filtering
+2. **Early Termination**: Stops processing once top_k results are collected
+3. **Metadata Indexing**: Category filtering leverages ChromaDB's indexed metadata for efficient filtering
+
+## Testing the Feature
+
+### Run with Current Settings
+
+```bash
+cargo run
+```
+
+### Modify Filters
+
+Edit these lines in `src/main.rs`:
+
+```rust
+let category_filter = Some("Technology");  // or None
+let distance_threshold = Some(1.0);        // or None
+```
+
+### Test Scenarios
+
+See `test_dual_filtering.rs` for comprehensive test scenarios covering:
+
+- Strict dual filtering
+- Single filter modes
+- No filtering
+- Edge cases
+
+## Benefits
+
+1. **Precision**: Retrieve only the most relevant documents
+2. **Flexibility**: Use one, both, or neither filter as needed
+3. **Performance**: Avoid processing irrelevant documents
+4. **User Experience**: Clear feedback when filters are too restrictive
+5. **Quality Control**: Ensure LLM receives high-quality context
+
+## Best Practices
+
+1. **Start Broad**: Begin with relaxed thresholds and tighten as needed
+2. **Monitor Results**: Check the distance scores to calibrate thresholds
+3. **Category Selection**: Choose categories that align with your query domain
+4. **Fallback Strategy**: Always handle the case where no results match
+5. **Testing**: Test with various combinations to understand the corpus distribution

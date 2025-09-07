@@ -16,6 +16,7 @@ pub async fn retrieve_top_chunks(
     top_k: usize,
     embedder: &SentenceEmbedder,
     category_filter: Option<&str>,
+    distance_threshold: Option<f32>,
 ) -> Result<Vec<RetrievedChunk>, Box<dyn std::error::Error>> {
 
     let query_embeddings = embedder.embed_texts(&[query])?;
@@ -25,10 +26,17 @@ pub async fn retrieve_top_chunks(
         json!({"category": category})
     });
 
+    // Request more results than top_k to account for filtering by distance
+    let query_n = if distance_threshold.is_some() {
+        top_k * 3  // Request more to ensure we have enough after filtering
+    } else {
+        top_k
+    };
+
     let query_options = QueryOptions {
         query_texts: None,
         query_embeddings: Some(query_embeddings),
-        n_results: Some(top_k),
+        n_results: Some(query_n),
         where_metadata,
         where_document: None,
         include: Some(vec!["documents", "distances", "metadatas"]),
@@ -48,6 +56,15 @@ pub async fn retrieve_top_chunks(
                     .copied()
                     .unwrap_or(0.0);
 
+                // Apply distance threshold filtering
+                // Note: In ChromaDB, lower distance = higher similarity
+                // Typical distance ranges: 0.0 (identical) to 2.0 (completely different)
+                if let Some(threshold) = distance_threshold {
+                    if distance > threshold {
+                        continue; // Skip chunks that are too dissimilar
+                    }
+                }
+
                 // Extract doc_id from metadata if available
                 let doc_id = query_result
                     .metadatas
@@ -65,6 +82,11 @@ pub async fn retrieve_top_chunks(
                     doc_id,
                     distance,
                 });
+
+                // Stop if we've collected enough chunks
+                if retrieved_chunks.len() >= top_k {
+                    break;
+                }
             }
         }
     }

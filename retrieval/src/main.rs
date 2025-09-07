@@ -27,101 +27,119 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let doc_count = collection.count().await?;
     println!("ChromaDB collection created with {} documents.", doc_count);
 
-    // Define a query and category to test the retrieval function
-    let user_query = "What are the recent discoveries and innovations?";
-    let category_filter = None;  // Available categories: "Technology", "Science", "Health", "Education", "Business", "Transportation", etc., or None for no filter
-    
+    // Define a user query and category for filtering
+    let user_query = "What are the recent developments in artificial intelligence?";
+    let category_filter = None;  // Options: "Technology", "Science", "Health", etc., or None
+    let distance_threshold = Some(1.0);  // Only include chunks with distance <= 1.0 (good similarity)
+                                         // Typical ranges: 0.0-0.5 (very similar), 0.5-1.0 (similar), 1.0-1.5 (somewhat similar), >1.5 (dissimilar)
+
+    // Retrieve the top documents relevant to the query with both filters
+    let top_k = 3;
+
     println!("\n{}", "=".repeat(60));
+    println!("RAG SYSTEM WITH DUAL FILTERING");
+    println!("{}", "=".repeat(60));
     println!("Query: {}", user_query);
-    if let Some(category) = category_filter {
-        println!("Category Filter: {}", category);
-    } else {
-        println!("Category Filter: None (searching all categories)");
-    }
+    println!("Category Filter: {:?}", category_filter.unwrap_or("None"));
+    println!("Distance Threshold: {:?} (lower = more similar)", distance_threshold.unwrap_or(2.0));
+    println!("Max Results: {}", top_k);
     println!("{}", "=".repeat(60));
 
-    // Retrieve chunks matching the query and category
-    let top_k = 3;
     let retrieved_chunks = retrieve_top_chunks(
         &collection, 
         user_query, 
         top_k, 
-        &embedder,
-        category_filter
+        &embedder, 
+        category_filter,
+        distance_threshold
     ).await?;
 
-    // Handle cases where no chunks match the specified category
+    // Check if we found any results
     if retrieved_chunks.is_empty() {
-        println!("\n⚠️  No documents found matching the query");
+        println!("\n⚠️  No relevant documents found!");
+        println!("\nThe search returned no results that meet your criteria:");
         if let Some(category) = category_filter {
-            println!("    with category filter: '{}'\n", category);
-            println!("Trying without category filter...\n");
-            
-            // Try again without category filter
-            let all_chunks = retrieve_top_chunks(
-                &collection,
-                user_query,
-                top_k,
-                &embedder,
-                None
-            ).await?;
-            
-            if !all_chunks.is_empty() {
-                println!("Found {} documents without category filter:", all_chunks.len());
-                for (i, chunk) in all_chunks.iter().enumerate() {
-                    println!("\nDocument {}", i + 1);
-                    println!("Text: {}...", &chunk.chunk[..chunk.chunk.len().min(200)]);
-                    println!("Distance: {:.4}", chunk.distance);
-                }
-            } else {
-                println!("No documents found even without category filter.");
+            println!("  • Category: {}", category);
+        }
+        if let Some(threshold) = distance_threshold {
+            println!("  • Similarity threshold: distance ≤ {:.2}", threshold);
+        }
+        
+        println!("\nSuggestions:");
+        println!("  1. Try relaxing the distance threshold (increase the value)");
+        println!("  2. Remove or change the category filter");
+        println!("  3. Rephrase your query");
+        
+        // Try without filters to show what's available
+        println!("\n{}", "-".repeat(60));
+        println!("Attempting search without filters for comparison...");
+        let unfiltered_chunks = retrieve_top_chunks(
+            &collection,
+            user_query,
+            top_k,
+            &embedder,
+            None,  // No category filter
+            None   // No distance threshold
+        ).await?;
+        
+        if !unfiltered_chunks.is_empty() {
+            println!("\nFound {} documents without filters:", unfiltered_chunks.len());
+            for (i, chunk) in unfiltered_chunks.iter().enumerate() {
+                println!("\n  {}. Distance: {:.4}, Doc ID: {}", i + 1, chunk.distance, chunk.doc_id);
+                println!("     Preview: {}...", &chunk.chunk[..chunk.chunk.len().min(150)]);
             }
+            println!("\nThese results show what's available without filtering constraints.");
         } else {
-            println!("No documents found in the collection.");
+            println!("\nNo documents found even without filters. The query might be too specific.");
         }
-        return Ok(());
-    }
-
-    // Print retrieved documents
-    println!("\n✓ Retrieved {} documents:", retrieved_chunks.len());
-    for (i, chunk) in retrieved_chunks.iter().enumerate() {
-        println!("\n{}", "-".repeat(40));
-        println!("Document {} (ID: {}, Distance: {:.4})", i + 1, chunk.doc_id, chunk.distance);
-        println!("{}", "-".repeat(40));
-        println!("{}", chunk.chunk);
-    }
-
-    // Create LLM client and generate response
-    println!("\n{}", "=".repeat(60));
-    println!("INITIALIZING LLM CLIENT");
-    println!("{}", "=".repeat(60));
-    let llm_client = LlmClient::new();
-    
-    // Build the prompt with retrieved chunks
-    let prompt = llm_client.build_prompt(user_query, &retrieved_chunks);
-    
-    // Print the formatted prompt for demonstration
-    println!("\n{}", "=".repeat(60));
-    println!("FORMATTED PROMPT");
-    println!("{}", "=".repeat(60));
-    println!("{}", prompt);
-    
-    // Get LLM response
-    println!("{}", "=".repeat(60));
-    println!("GETTING LLM RESPONSE");
-    println!("{}", "=".repeat(60));
-    
-    match llm_client.get_llm_response(&prompt).await {
-        Ok(response) => {
-            println!("\n{}", "=".repeat(60));
-            println!("FINAL ANSWER");
-            println!("{}", "=".repeat(60));
-            println!("{}", response);
-            println!("\n{}", "=".repeat(60));
+    } else {
+        println!("\n✓ Retrieved {} documents meeting all criteria:", retrieved_chunks.len());
+        
+        // Display retrieved chunks with details
+        for (i, chunk) in retrieved_chunks.iter().enumerate() {
+            println!("\n{}", "-".repeat(40));
+            println!("Document {} | ID: {} | Distance: {:.4}", i + 1, chunk.doc_id, chunk.distance);
+            println!("Similarity: {}", match chunk.distance {
+                d if d <= 0.5 => "Very High ★★★★★",
+                d if d <= 0.8 => "High ★★★★",
+                d if d <= 1.0 => "Good ★★★",
+                d if d <= 1.2 => "Moderate ★★",
+                _ => "Low ★"
+            });
+            println!("{}", "-".repeat(40));
+            println!("{}", chunk.chunk);
         }
-        Err(e) => {
-            eprintln!("\n❌ Error getting LLM response: {}", e);
-            eprintln!("   Make sure OPENAI_API_KEY is set in your environment or .env file");
+
+        // Build the LLM prompt using the retrieved contexts
+        println!("\n{}", "=".repeat(60));
+        println!("GENERATING LLM RESPONSE");
+        println!("{}", "=".repeat(60));
+        
+        let llm_client = LlmClient::new();
+        let final_prompt = llm_client.build_prompt(user_query, &retrieved_chunks);
+        
+        // Show prompt preview (first part)
+        println!("\nPrompt Preview:");
+        let prompt_preview = if final_prompt.len() > 500 {
+            format!("{}...", &final_prompt[..500])
+        } else {
+            final_prompt.clone()
+        };
+        println!("{}", prompt_preview);
+
+        // Query the LLM
+        match llm_client.get_llm_response(&final_prompt).await {
+            Ok(answer) => {
+                println!("\n{}", "=".repeat(60));
+                println!("LLM RESPONSE");
+                println!("{}", "=".repeat(60));
+                println!("{}", answer);
+                println!("{}", "=".repeat(60));
+            }
+            Err(e) => {
+                eprintln!("\n❌ Error getting LLM response: {}", e);
+                eprintln!("   Make sure OPENAI_API_KEY is set in your environment or .env file");
+            }
         }
     }
 
