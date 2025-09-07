@@ -15,42 +15,61 @@ pub async fn retrieve_top_chunks(
     query: &str,
     top_k: usize,
     embedder: &SentenceEmbedder,
+    category_filter: Option<&str>,
 ) -> Result<Vec<RetrievedChunk>, Box<dyn std::error::Error>> {
-    // Embed the query text to obtain its vector representation
-    let query_embedding = embedder.embed_texts(&[query])?;
 
-    // Set up the query options, specifying the use of query embeddings and the number of top results to retrieve
+    let query_embeddings = embedder.embed_texts(&[query])?;
+
+    // Build metadata filter if category is provided
+    let where_metadata = category_filter.map(|category| {
+        json!({"category": category})
+    });
+
     let query_options = QueryOptions {
+        query_texts: None,
+        query_embeddings: Some(query_embeddings),
         n_results: Some(top_k),
-        query_embeddings: Some(query_embedding),
-        include: Some(vec!["documents", "distances"]),
-        ..Default::default()
+        where_metadata,
+        where_document: None,
+        include: Some(vec!["documents", "distances", "metadatas"]),
     };
 
-    // Execute the query on the collection to retrieve the most relevant document chunks
-    let result = collection
-        .query(query_options, None)
-        .await?;
+    let query_result = collection.query(query_options, None).await?;
+    let mut retrieved_chunks = Vec::new();
 
-    let mut chunks = Vec::new();
+    if let Some(documents_groups) = query_result.documents.as_ref() {
+        if let Some(documents) = documents_groups.get(0) {
+            for (i, doc) in documents.iter().enumerate() {
+                let distance = query_result
+                    .distances
+                    .as_ref()
+                    .and_then(|rows| rows.get(0))
+                    .and_then(|row| row.get(i))
+                    .copied()
+                    .unwrap_or(0.0);
 
-    // Early return if no results
-    if result.documents.is_none() || result.documents.as_ref().unwrap().is_empty() {
-        return Ok(chunks);
+                // Extract doc_id from metadata if available
+                let doc_id = query_result
+                    .metadatas
+                    .as_ref()
+                    .and_then(|rows| rows.get(0))
+                    .and_then(|row| row.get(i))
+                    .and_then(|metadata| metadata.as_ref())
+                    .and_then(|metadata| metadata.get("doc_id"))
+                    .and_then(|value| value.as_u64())
+                    .map(|id| id as usize)
+                    .unwrap_or(i); // Fallback to index if metadata not found
+
+                retrieved_chunks.push(RetrievedChunk {
+                    chunk: doc.clone(),
+                    doc_id,
+                    distance,
+                });
+            }
+        }
     }
 
-    let documents = &result.documents.as_ref().unwrap()[0];
-    let distances = result.distances.as_ref().map(|d| d[0].clone()).unwrap_or_default();
-
-    for i in 0..documents.len() {
-        chunks.push(RetrievedChunk {
-            chunk: documents[i].clone(),
-            doc_id: i,
-            distance: distances.get(i).copied().unwrap_or(0.0),
-        });
-    }
-
-    Ok(chunks)
+    Ok(retrieved_chunks)
 }
 
 
@@ -60,23 +79,23 @@ pub async fn build_chroma_collection(
     collection_name: &str,
     embedder: &SentenceEmbedder,
 ) -> Result<ChromaCollection, Box<dyn std::error::Error>> {
+
     let client = ChromaClient::new(ChromaClientOptions::default()).await?;
     let collection = client.get_or_create_collection(collection_name, None).await?;
 
-    // Skip empty collection
-    if chunks.is_empty() {
-        return Ok(collection);
-    }
-
+    // Use the entire document content.
     let texts: Vec<String> = chunks.iter().map(|chunk| chunk.text.clone()).collect();
-    let documents: Vec<&str> = texts.iter().map(AsRef::as_ref).collect();
 
-    let ids_owned: Vec<String> = chunks.iter()
+    // Create a unique ID for each document
+    let ids_owned: Vec<String> = chunks
+        .iter()
         .map(|chunk| format!("doc_{}", chunk.doc_id))
         .collect();
-    let ids: Vec<&str> = ids_owned.iter().map(AsRef::as_ref).collect();
+    let ids: Vec<&str> = ids_owned.iter().map(|s| s.as_str()).collect();
 
-    let metadatas = chunks.iter()
+    // Prepare metadata for each document.
+    let metadatas: Vec<serde_json::Map<String, serde_json::Value>> = chunks
+        .iter()
         .map(|chunk| {
             let mut map = serde_json::Map::new();
             map.insert("doc_id".to_string(), json!(chunk.doc_id));
@@ -86,8 +105,11 @@ pub async fn build_chroma_collection(
         })
         .collect();
 
-    // Embed documents directly
-    let embeddings = embedder.embed_texts(&documents)?;
+    // Get embeddings for the documents.
+    let text_slices: Vec<&str> = texts.iter().map(String::as_str).collect();
+    let embeddings = embedder.embed_texts(&text_slices)?;
+
+    let documents: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
 
     let entries = CollectionEntries {
         ids,

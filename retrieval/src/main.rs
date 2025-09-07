@@ -27,26 +27,74 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let doc_count = collection.count().await?;
     println!("ChromaDB collection created with {} documents.", doc_count);
 
-    // TODO: Define a query string to test the retrieval function
-    let user_query = "What are some recent technological breakthroughs?";
+    // Define a query and category to test the retrieval function
+    let user_query = "What are the recent discoveries and innovations?";
+    let category_filter = None;  // Available categories: "Technology", "Science", "Health", "Education", "Business", "Transportation", etc., or None for no filter
+    
+    println!("\n{}", "=".repeat(60));
+    println!("Query: {}", user_query);
+    if let Some(category) = category_filter {
+        println!("Category Filter: {}", category);
+    } else {
+        println!("Category Filter: None (searching all categories)");
+    }
+    println!("{}", "=".repeat(60));
 
-    // Retrieve the top documents relevant to the query.
+    // Retrieve chunks matching the query and category
     let top_k = 3;
-    let retrieved_chunks = retrieve_top_chunks(&collection, user_query, top_k, &embedder).await?;
+    let retrieved_chunks = retrieve_top_chunks(
+        &collection, 
+        user_query, 
+        top_k, 
+        &embedder,
+        category_filter
+    ).await?;
+
+    // Handle cases where no chunks match the specified category
+    if retrieved_chunks.is_empty() {
+        println!("\n⚠️  No documents found matching the query");
+        if let Some(category) = category_filter {
+            println!("    with category filter: '{}'\n", category);
+            println!("Trying without category filter...\n");
+            
+            // Try again without category filter
+            let all_chunks = retrieve_top_chunks(
+                &collection,
+                user_query,
+                top_k,
+                &embedder,
+                None
+            ).await?;
+            
+            if !all_chunks.is_empty() {
+                println!("Found {} documents without category filter:", all_chunks.len());
+                for (i, chunk) in all_chunks.iter().enumerate() {
+                    println!("\nDocument {}", i + 1);
+                    println!("Text: {}...", &chunk.chunk[..chunk.chunk.len().min(200)]);
+                    println!("Distance: {:.4}", chunk.distance);
+                }
+            } else {
+                println!("No documents found even without category filter.");
+            }
+        } else {
+            println!("No documents found in the collection.");
+        }
+        return Ok(());
+    }
 
     // Print retrieved documents
-    println!("\nRetrieved {} documents:", retrieved_chunks.len());
+    println!("\n✓ Retrieved {} documents:", retrieved_chunks.len());
     for (i, chunk) in retrieved_chunks.iter().enumerate() {
-        println!("Document {}", i + 1);
-        println!("Text: {}", chunk.chunk);
-        println!("Doc ID: {}", chunk.doc_id);
-        println!("Distance: {}", chunk.distance);
+        println!("\n{}", "-".repeat(40));
+        println!("Document {} (ID: {}, Distance: {:.4})", i + 1, chunk.doc_id, chunk.distance);
         println!("{}", "-".repeat(40));
+        println!("{}", chunk.chunk);
     }
 
     // Create LLM client and generate response
     println!("\n{}", "=".repeat(60));
-    println!("Initializing LLM Client...");
+    println!("INITIALIZING LLM CLIENT");
+    println!("{}", "=".repeat(60));
     let llm_client = LlmClient::new();
     
     // Build the prompt with retrieved chunks
@@ -54,26 +102,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
     
     // Print the formatted prompt for demonstration
     println!("\n{}", "=".repeat(60));
-    println!("FORMATTED PROMPT:");
+    println!("FORMATTED PROMPT");
     println!("{}", "=".repeat(60));
     println!("{}", prompt);
     
     // Get LLM response
     println!("{}", "=".repeat(60));
-    println!("Getting LLM Response...");
+    println!("GETTING LLM RESPONSE");
     println!("{}", "=".repeat(60));
     
     match llm_client.get_llm_response(&prompt).await {
         Ok(response) => {
             println!("\n{}", "=".repeat(60));
-            println!("FINAL ANSWER:");
+            println!("FINAL ANSWER");
             println!("{}", "=".repeat(60));
             println!("{}", response);
-            println!("{}", "=".repeat(60));
+            println!("\n{}", "=".repeat(60));
         }
         Err(e) => {
-            eprintln!("Error getting LLM response: {}", e);
-            eprintln!("Make sure OPENAI_API_KEY is set in your environment or .env file");
+            eprintln!("\n❌ Error getting LLM response: {}", e);
+            eprintln!("   Make sure OPENAI_API_KEY is set in your environment or .env file");
         }
     }
 
