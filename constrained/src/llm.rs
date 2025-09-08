@@ -31,7 +31,9 @@ impl LlmClient {
     }
 
     /// Generate an answer given a query and retrieved context, under different prompting strategies.
-    pub async fn generate_with_constraints(
+    /// TODO: Add context-length validation and smart truncation if the context exceeds a limit of 4096 tokens (approx. word-based).
+    /// If truncation occurs, "[Context truncated]" should be appended to the answer.
+pub async fn generate_with_constraints(
         &self,
         query: &str,
         retrieved_context: &str,
@@ -45,6 +47,42 @@ impl LlmClient {
             ));
         }
 
+        // Approximate token limit
+        const MAX_TOKENS: usize = 4096;
+
+        // Check and truncate context if too large
+        let mut context = retrieved_context.to_string();
+        let mut truncated = false;
+
+        // Approximate token count (1 token ≈ 0.75 words)
+        let word_count = context.split_whitespace().count();
+        let approx_tokens = (word_count as f32 / 0.75).ceil() as usize;
+
+        if approx_tokens > MAX_TOKENS {
+            truncated = true;
+            // Split context into sentences
+            let sentences: Vec<&str> = context
+                .split_inclusive(&['.', '!', '?'])
+                .filter(|s| !s.trim().is_empty())
+                .collect();
+            let mut truncated_context = String::new();
+            let mut current_tokens = 0;
+
+            // Add sentences until reaching token limit
+            for sentence in sentences {
+                let sentence_words = sentence.split_whitespace().count();
+                let sentence_tokens = (sentence_words as f32 / 0.75).ceil() as usize;
+                if current_tokens + sentence_tokens <= MAX_TOKENS {
+                    truncated_context.push_str(sentence);
+                    current_tokens += sentence_tokens;
+                } else {
+                    break;
+                }
+            }
+
+            context = truncated_context;
+        }
+
         // Build the prompt according to the chosen strategy
         let prompt = match strategy {
             "strict" => format!(
@@ -54,23 +92,22 @@ impl LlmClient {
                 Context:\n{}\n\
                 Question: '{}'\n\
                 Answer:",
-                retrieved_context, query
+                context, query
             ),
             "cite" => format!(
-                "Answer the question strictly using the provided context. \
-                You must include a 'Cited lines:' section listing the specific lines from the context used to form your answer. \
-                If the answer cannot be found in the context, respond with 'Not available in the provided context'.\n\n\
-                Context:\n{}\n\
+                "Answer strictly from the provided context, and list the lines you used as evidence with 'Cited lines:'.\
+                If the context does not contain the information, respond with: 'Not available in the retrieved texts.'\n\n\
+                Provided context (label lines as needed):\n{}\n\
                 Question: '{}'\n\
                 Answer:",
-                retrieved_context, query
+                context, query
             ),
             _ => format!(
                 "Use the following context to answer the question in a concise manner.\n\n\
                 Context:\n{}\n\
                 Question: '{}'\n\
                 Answer:",
-                retrieved_context, query
+                context, query
             ),
         };
 
@@ -81,13 +118,18 @@ impl LlmClient {
 
         // Parse out "Cited lines:" if present
         let parts: Vec<&str> = response.splitn(2, "Cited lines:").collect();
-        if parts.len() == 2 {
-            let answer = parts[0].trim().to_string();
-            let cited = parts[1].trim().to_string();
-            Ok((answer, cited))
+        let (mut answer, cited) = if parts.len() == 2 {
+            (parts[0].trim().to_string(), parts[1].trim().to_string())
         } else {
-            Ok((response.trim().to_string(), "No explicit lines cited.".to_string()))
+            (response.trim().to_string(), "No explicit lines cited.".to_string())
+        };
+
+        // Append truncation warning if context was truncated
+        if truncated {
+            answer.push_str(" [Context truncated]");
         }
+
+        Ok((answer, cited))
     }
 
     pub async fn get_llm_response(&self, prompt: &str) -> Result<String, Box<dyn std::error::Error>> {
