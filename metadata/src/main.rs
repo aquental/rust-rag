@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Search WITHOUT category filtering
     println!("\n======== WITHOUT CATEGORY FILTER ========");
     let no_filter_results =
-        metadata_enhanced_search(&collection, query_input, None, 3, &embedder).await?;
+        metadata_enhanced_search(&collection, query_input, None, None, 3, &embedder).await?;
 
     for chunk in no_filter_results {
         println!(
@@ -53,6 +53,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         &collection,
         query_input,
         Some(vec!["Education".to_string()]),
+        None,
         3,
         &embedder,
     )

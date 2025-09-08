@@ -9,6 +9,7 @@ pub struct Chunk {
     pub chunk_id: usize,
     pub category: String,
     pub text: String,
+    pub date: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -16,6 +17,7 @@ struct Document {
     id: usize,
     content: String,
     category: Option<String>,
+    date: Option<String>,
 }
 
 /// Splits the given text into chunks of size 'chunk_size' words.
@@ -54,6 +56,7 @@ pub fn load_and_chunk_dataset(
                 chunk_id,
                 category: doc_category.clone(),
                 text: chunk_str,
+                date: doc.date.clone(),
             });
         }
     }
