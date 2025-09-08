@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Search WITHOUT category filtering
     println!("\n======== WITHOUT CATEGORY FILTER ========");
     let no_filter_results =
-        metadata_enhanced_search(&collection, query_input, None, None, 3, &embedder).await?;
+        metadata_enhanced_search(&collection, query_input, None, 3, &embedder).await?;
 
     for chunk in no_filter_results {
         println!(
@@ -47,19 +47,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("Chunk: {}\n", chunk.chunk);
     }
 
-    // Search WITH category filtering
-    println!("\n======== WITH CATEGORY FILTER (Education) ========");
-    let filter_results = metadata_enhanced_search(
+    // Search WITH a very strict category filter (demonstrating fallback)
+    let very_strict_category = "NonExistentCategory";
+    println!(
+        "\n======== WITH VERY STRICT CATEGORY FILTER ({}) ========",
+        very_strict_category
+    );
+    let strict_filter_results = metadata_enhanced_search(
         &collection,
         query_input,
-        Some(vec!["Education".to_string()]),
-        None,
+        Some(vec![very_strict_category.to_string()]),
         3,
         &embedder,
     )
     .await?;
 
-    for chunk in filter_results {
+    for chunk in strict_filter_results {
         println!(
             "Doc ID: {}, Category: {}, Distance: {:.4}",
             chunk.doc_id,
