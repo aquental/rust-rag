@@ -48,18 +48,19 @@ impl LlmClient {
         // Build the prompt according to the chosen strategy
         let prompt = match strategy {
             "strict" => format!(
-                "You must ONLY use the provided context to answer the question. \
-                 Do not use any external information or knowledge beyond the context. \
-                 If the answer cannot be found in the context, respond with 'No sufficient data'.\n\n\
-                 Context:\n{}\n\
-                 Question: '{}'\n\
-                 Answer:",
+                "You must ONLY use the context provided below. \
+                If you cannot find the answer in the context, say: 'No sufficient data'.\n\
+                Do not provide any information not found in the context.\n\n\
+                Context:\n{}\n\
+                Question: '{}'\n\
+                Answer:",
                 retrieved_context, query
             ),
             "cite" => format!(
-                "Answer strictly from the provided context, and list the lines you used as evidence with 'Cited lines:'.\
-                If the context does not contain the information, respond with: 'Not available in the retrieved texts.'\n\n\
-                Provided context (label lines as needed):\n{}\n\
+                "Answer the question strictly using the provided context. \
+                You must include a 'Cited lines:' section listing the specific lines from the context used to form your answer. \
+                If the answer cannot be found in the context, respond with 'Not available in the provided context'.\n\n\
+                Context:\n{}\n\
                 Question: '{}'\n\
                 Answer:",
                 retrieved_context, query
