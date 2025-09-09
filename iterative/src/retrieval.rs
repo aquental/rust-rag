@@ -1,4 +1,3 @@
-use regex::Regex;
 use serde_json::Value;
 
 /// A small set of English stopwords.
@@ -50,13 +49,25 @@ use crate::vector_db::retrieve_best_chunk;
 use crate::embeddings::SentenceEmbedder;
 use chromadb::collection::ChromaCollection;
 
+/// Structure to hold one iteration’s data.
+pub struct IterationResult {
+    pub step: usize,
+    pub query: String,
+    pub retrieved_text: String,
+    pub metadata: Value,
+    pub score: f32,
+}
+
 /// Perform up to `steps` rounds of retrieve→extract keyword→refine.
+/// TODO: Add a `max_chunks` parameter to control the maximum number of chunks to retrieve.
+/// TODO: Stop the loop if the number of retrieved chunks reaches `max_chunks`.
 pub async fn iterative_retrieval(
     collection: &ChromaCollection,
     embedder: &SentenceEmbedder,
     initial_query: &str,
     steps: usize,
     improvement_threshold: f32,
+    max_chunks: usize,
 ) -> Result<Vec<IterationResult>, Box<dyn std::error::Error>> {
     let mut results = Vec::new();
     let mut current_query = initial_query.to_string();
@@ -89,6 +100,12 @@ pub async fn iterative_retrieval(
             score,
         });
 
+        // Stop if we've hit the max_chunks limit
+        if results.len() >= max_chunks {
+            println!("Reached maximum number of chunks ({}). Stopping.", max_chunks);
+            break;
+        }
+
         let kw = extract_refinement_keyword(&text, &current_query);
         if kw.is_empty() {
             println!("No suitable keyword for further refinement.");
@@ -99,15 +116,6 @@ pub async fn iterative_retrieval(
     }
 
     Ok(results)
-}
-
-/// Structure to hold one iteration’s data.
-pub struct IterationResult {
-    pub step: usize,
-    pub query: String,
-    pub retrieved_text: String,
-    pub metadata: Value,
-    pub score: f32,
 }
 
 /// Combine all iteration texts into one bullet‑list context.

@@ -34,6 +34,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         initial_query,
         /*steps=*/3,
         /*improvement_threshold=*/0.02,
+        /*max_chunks=*/3,
     ).await?;
 
     // Build and print final context
