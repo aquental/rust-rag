@@ -1,4 +1,7 @@
 use serde_json::Value;
+use crate::vector_db::retrieve_best_chunk;
+use crate::embeddings::SentenceEmbedder;
+use chromadb::collection::ChromaCollection;
 
 /// A small set of English stopwords.
 const STOPWORDS: &[&str] = &[
@@ -10,8 +13,8 @@ const STOPWORDS: &[&str] = &[
     "why","how"
 ];
 
-/// Extract the longest non-stopword, non-query word of length >4 from `chunk_text`.
-pub fn extract_refinement_keyword(chunk_text: &str, current_query: &str) -> String {
+/// Extract up to two non-stopword, non-query words of length > 4 from `chunk_text`.
+pub fn extract_refinement_keywords(chunk_text: &str, current_query: &str) -> Vec<String> {
     let chunk_lower = chunk_text.to_lowercase();
     let query_lower = current_query.to_lowercase();
 
@@ -27,27 +30,24 @@ pub fn extract_refinement_keyword(chunk_text: &str, current_query: &str) -> Stri
         .filter(|w: &String| !w.is_empty())
         .collect();
 
-    let candidates: Vec<String> = chunk_words.into_iter()
+    let mut candidates: Vec<String> = chunk_words.into_iter()
         .filter(|w| w.len() > 4 && !STOPWORDS.contains(&w.as_str()) && !query_words.contains(w))
         .collect();
 
-    candidates.into_iter()
-        .max_by_key(|w| w.len())
-        .unwrap_or_default()
+    // Sort by length in descending order and take up to two keywords
+    candidates.sort_by(|a, b| b.len().cmp(&a.len()));
+    candidates.into_iter().take(2).collect()
 }
 
-/// Append the `refine_word` to the `current_query`, if non-empty.
-pub fn refine_query(current_query: &str, refine_word: &str) -> String {
-    if refine_word.is_empty() {
+/// Append multiple keywords to the `current_query`, if non-empty.
+pub fn refine_query(current_query: &str, refine_words: &[String]) -> String {
+    if refine_words.is_empty() {
         current_query.to_string()
     } else {
-        format!("{} {}", current_query, refine_word)
+        let keywords = refine_words.join(" ");
+        format!("{} {}", current_query, keywords)
     }
 }
-
-use crate::vector_db::retrieve_best_chunk;
-use crate::embeddings::SentenceEmbedder;
-use chromadb::collection::ChromaCollection;
 
 /// Structure to hold one iteration’s data.
 pub struct IterationResult {
@@ -58,9 +58,8 @@ pub struct IterationResult {
     pub score: f32,
 }
 
-/// Perform up to `steps` rounds of retrieve→extract keyword→refine.
-/// TODO: Add a `max_chunks` parameter to control the maximum number of chunks to retrieve.
-/// TODO: Stop the loop if the number of retrieved chunks reaches `max_chunks`.
+/// Perform up to `steps` rounds of retrieve→extract keywords→refine.
+/// Stops if the number of retrieved chunks reaches `max_chunks`.
 pub async fn iterative_retrieval(
     collection: &ChromaCollection,
     embedder: &SentenceEmbedder,
@@ -106,19 +105,19 @@ pub async fn iterative_retrieval(
             break;
         }
 
-        let kw = extract_refinement_keyword(&text, &current_query);
-        if kw.is_empty() {
-            println!("No suitable keyword for further refinement.");
+        let keywords = extract_refinement_keywords(&text, &current_query);
+        if keywords.is_empty() {
+            println!("No suitable keywords for further refinement.");
             break;
         }
-        println!("Refining query with keyword: {}", kw);
-        current_query = refine_query(&current_query, &kw);
+        println!("Refining query with keywords: {:?}", keywords);
+        current_query = refine_query(&current_query, &keywords);
     }
 
     Ok(results)
 }
 
-/// Combine all iteration texts into one bullet‑list context.
+/// Combine all iteration texts into one bullet-list context.
 pub fn build_final_context(results: &[IterationResult]) -> String {
     if results.is_empty() {
         return "No relevant information was found after iterative retrieval.".to_string();
