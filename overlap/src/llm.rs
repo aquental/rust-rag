@@ -30,26 +30,39 @@ impl LlmClient {
         }
     }
 
-    /// Final answer generation given a query and context
+    /// Generates answers based on context
+    ///
+    /// Checks if context is empty, then create a prompt with query and context
+    /// If context is empty or whitespace-only, returns a default message
+    /// Otherwise, formulates the prompt with query and context and generates a response using get_llm_response
     pub async fn generate_final_answer(
         &self,
         query: &str,
         context: &str,
     ) -> Result<String, Box<dyn std::error::Error>> {
+        // Handle empty or whitespace-only context
         if context.trim().is_empty() {
             return Ok("I'm sorry, but I couldn't find any relevant information.".to_string());
         }
 
+        // Formulate the prompt with query and context
         let prompt = format!(
-            "Question: {}\n\
-             Context:\n{}\n\
-             Answer:",
+            "Question: {}\nContext:\n{}\nAnswer:",
             query, context
         );
 
-        self.get_llm_response(&prompt).await
+        // Generate response using get_llm_response
+        let response = self.get_llm_response(&prompt).await?;
+        Ok(response)
     }
 
+    /// Generates a response using the given prompt with the LLM client.
+    ///
+    /// This function takes a prompt string, builds a default system message with the
+    /// client's system prompt, and then builds a user message with the given prompt.
+    /// It then creates a `CreateChatCompletionRequest` with the two messages, and
+    /// calls the `chat().create()` method of the client to generate a response.
+    /// The response is then extracted from the result and returned as a string.
     pub async fn get_llm_response(&self, prompt: &str) -> Result<String, Box<dyn std::error::Error>> {
         // Build messages using the default system prompt.
         let system_message = ChatCompletionRequestSystemMessage {
