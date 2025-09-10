@@ -54,6 +54,7 @@ pub fn are_chunks_overlapping(chunks: &[String], similarity_threshold: f32) -> b
 }
 
 /// Summarize the given chunks of text using the LLM.
+///
 /// If the summary is shorter than 20 characters or signals that a summary is not possible,
 /// return the full text of the chunks instead.
 pub async fn summarize_chunks(
@@ -75,8 +76,17 @@ pub async fn summarize_chunks(
 
     let summary = llm.get_llm_response(&prompt).await?.trim().to_string();
 
-    if summary.len() < 20 || summary.contains("Summary not possible") {
-        eprintln!("Summary was too short or signaled not possible; returning full text.");
+    // Only fall back if summary is too short or exactly "Summary not possible" (case-insensitive)
+    if summary.len() < 20 || summary.to_lowercase() == "summary not possible" {
+        eprintln!(
+            "Falling back to full text: summary {} (length: {})",
+            if summary.len() < 20 {
+                "too short"
+            } else {
+                "is 'Summary not possible'"
+            },
+            summary.len()
+        );
         Ok(combined)
     } else {
         Ok(summary)
