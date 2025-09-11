@@ -55,7 +55,6 @@ fn dot(a: &Embedding, b: &Embedding) -> f32 {
 }
 
 /// Perform hybrid retrieval combining BM25 scores and dense‐embedding similarity.
-
 pub async fn hybrid_retrieval(
     query: &str,
     chunks: &[Chunk],
@@ -73,7 +72,11 @@ pub async fn hybrid_retrieval(
         .fold((f32::INFINITY, f32::NEG_INFINITY), |(mn, mx), v| {
             (mn.min(v), mx.max(v))
         });
-    let denom = (b_max - b_min).max(f32::EPSILON);
+    let denom = if b_max == b_min {
+        1.0
+    } else {
+        (b_max - b_min).max(f32::EPSILON)
+    };
 
     // 2) Dense retrieval via ChromaDB (we ask only for distances)
     let q_emb = embedder.embed_texts(&[query])?;
@@ -94,8 +97,7 @@ pub async fn hybrid_retrieval(
             for (i, id_str) in ids0.iter().enumerate() {
                 if let Ok(idx) = id_str.parse::<usize>() {
                     let dist = d0.get(i).copied().unwrap_or(0.0);
-                    let similarity = 1.0 / (1.0 + dist);
-                    embed_sim.insert(idx, similarity);
+                    embed_sim.insert(idx, 1.0 / (1.0 + dist));
                 }
             }
         }
@@ -106,7 +108,11 @@ pub async fn hybrid_retrieval(
         .into_iter()
         .enumerate()
         .map(|(i, b_raw)| {
-            let b_norm = (b_raw - b_min) / denom;
+            let b_norm = if b_max == b_min {
+                0.0
+            } else {
+                (b_raw - b_min) / denom
+            };
             let e_sim = *embed_sim.get(&i).unwrap_or(&0.0);
             (i, alpha * b_norm + (1.0 - alpha) * e_sim)
         })
