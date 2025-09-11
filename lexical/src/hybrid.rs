@@ -55,6 +55,7 @@ fn dot(a: &Embedding, b: &Embedding) -> f32 {
 }
 
 /// Perform hybrid retrieval combining BM25 scores and dense‐embedding similarity.
+/// TODO: Filter out chunks with a combined score < 0.2 before sorting and selecting top_k.
 pub async fn hybrid_retrieval(
     query: &str,
     chunks: &[Chunk],
@@ -103,7 +104,7 @@ pub async fn hybrid_retrieval(
         }
     }
 
-    // 4) Combine BM25 (normalized) and dense sim into final scores
+    // 4) Combine BM25 (normalized) and dense sim into final scores, filter out scores < 0.2
     let mut merged: Vec<(usize, f32)> = b_scores
         .into_iter()
         .enumerate()
@@ -116,6 +117,7 @@ pub async fn hybrid_retrieval(
             let e_sim = *embed_sim.get(&i).unwrap_or(&0.0);
             (i, alpha * b_norm + (1.0 - alpha) * e_sim)
         })
+        .filter(|&(_, score)| score >= 0.2)
         .collect();
 
     // 5) Sort descending and take top_k
