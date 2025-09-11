@@ -13,10 +13,26 @@ pub struct Bm25Index {
 
 impl Bm25Index {
     /// Build the index by fitting BM25 to the full corpus of chunk texts.
+    ///
+    /// The returned index precomputes sparse embeddings for every chunk,
+    /// which can then be used for BM25 scoring with the `score` method.
     pub fn new(chunks: &[Chunk]) -> Self {
-        let corpus: Vec<&str> = chunks.iter().map(|c| c.text.as_str()).collect();
-        let embedder = EmbedderBuilder::with_fit_to_corpus(Language::English, &corpus).build();
-        let doc_embeddings = corpus.iter().map(|&text| embedder.embed(text)).collect();
+        // Process each chunk: convert to lowercase and collect as owned Strings
+        let corpus: Vec<String> = chunks.iter().map(|c| c.text.to_lowercase()).collect();
+
+        // Convert to Vec<&str> for BM25 embedder
+        let corpus_refs: Vec<&str> = corpus.iter().map(|s| s.as_str()).collect();
+
+        // Build the BM25 embedder using the processed corpus
+        let embedder = EmbedderBuilder::with_fit_to_corpus(Language::English, &corpus_refs).build();
+
+        // Precompute sparse embeddings for each chunk
+        let doc_embeddings = corpus_refs
+            .iter()
+            .map(|&text| embedder.embed(text))
+            .collect();
+
+        // Return the Bm25Index
         Bm25Index {
             embedder,
             doc_embeddings,
@@ -24,6 +40,9 @@ impl Bm25Index {
     }
 
     /// Compute a BM25‐style score for the query against every chunk.
+    ///
+    /// The scores are computed as the dot product of the query embedding and
+    /// the precomputed sparse embeddings for each chunk.
     pub fn score(&self, query: &str) -> Vec<f32> {
         let q_emb = self.embedder.embed(query);
         self.doc_embeddings
@@ -55,7 +74,16 @@ fn dot(a: &Embedding, b: &Embedding) -> f32 {
 }
 
 /// Perform hybrid retrieval combining BM25 scores and dense‐embedding similarity.
-/// TODO: Filter out chunks with a combined score < 0.2 before sorting and selecting top_k.
+///
+/// The score for each chunk is a weighted sum of its BM25 score and the
+/// cosine similarity between the query embedding and the chunk's dense
+/// embedding.  The BM25 scores are normalized to have a range of [0, 1]
+/// over the entire corpus, and the dense similarities are also normalized
+/// to [0, 1] over the entire corpus.  The final score is a weighted sum of
+/// these two normalized scores.
+///
+/// The function returns a sorted list of (chunk index, score) pairs, with
+/// the highest‐scoring pairs first.  The top `top_k` pairs are returned.
 pub async fn hybrid_retrieval(
     query: &str,
     chunks: &[Chunk],
@@ -73,11 +101,7 @@ pub async fn hybrid_retrieval(
         .fold((f32::INFINITY, f32::NEG_INFINITY), |(mn, mx), v| {
             (mn.min(v), mx.max(v))
         });
-    let denom = if b_max == b_min {
-        1.0
-    } else {
-        (b_max - b_min).max(f32::EPSILON)
-    };
+    let denom = (b_max - b_min).max(f32::EPSILON);
 
     // 2) Dense retrieval via ChromaDB (we ask only for distances)
     let q_emb = embedder.embed_texts(&[query])?;
@@ -104,20 +128,15 @@ pub async fn hybrid_retrieval(
         }
     }
 
-    // 4) Combine BM25 (normalized) and dense sim into final scores, filter out scores < 0.2
+    // 4) Combine BM25 (normalized) and dense sim into final scores
     let mut merged: Vec<(usize, f32)> = b_scores
         .into_iter()
         .enumerate()
         .map(|(i, b_raw)| {
-            let b_norm = if b_max == b_min {
-                0.0
-            } else {
-                (b_raw - b_min) / denom
-            };
+            let b_norm = (b_raw - b_min) / denom;
             let e_sim = *embed_sim.get(&i).unwrap_or(&0.0);
             (i, alpha * b_norm + (1.0 - alpha) * e_sim)
         })
-        .filter(|&(_, score)| score >= 0.2)
         .collect();
 
     // 5) Sort descending and take top_k
